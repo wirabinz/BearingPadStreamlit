@@ -23,14 +23,17 @@ with st.sidebar:
     st.caption("Developed for structural design checking.")
 
 # --- HELPER FUNCTION FOR STYLING ---
+# --- HELPER FUNCTION FOR STYLING ---
 def style_status_df(df):
     """Applies red/green background to the 'STATUS' column."""
     def _color_status(val):
         if val == 'PASS': return 'background-color: #28a745; color: white'
         elif val == 'FAIL': return 'background-color: #dc3545; color: white'
         return ''
+    
     if 'STATUS' in df.columns:
-        return df.style.applymap(_color_status, subset=['STATUS'])
+        # CHANGE: .applymap() is now .map() in modern Pandas
+        return df.style.map(_color_status, subset=['STATUS'])
     return df
 
 # --- HELPER FUNCTION FOR BUILDING BEARING SECTION ---
