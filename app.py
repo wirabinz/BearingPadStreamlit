@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import engine
+import matplotlib.pyplot as plt
+
 
 # Set page to wide mode for better table visibility
 st.set_page_config(page_title="EN 1337-3 Bearing Tool", layout="wide")
@@ -8,21 +10,12 @@ st.set_page_config(page_title="EN 1337-3 Bearing Tool", layout="wide")
 # --- SIDEBAR: MODE & SETTINGS ---
 with st.sidebar:
     st.title("Settings & Modes")
-    # Selection for App Mode
-    mode = st.radio(
+    # Dropdown menu for operation mode
+    mode = st.selectbox(
         "Select Operation Mode:", 
-        ["Optimization (Search)", "Manual Check (Report Mode)"],
-        help="Optimization searches for configs. Manual Check provides detailed math for a specific config."
+        ["Elastomer Configuration", "Manual Check (Report Mode)"],
+        help="Elastomer Configuration searches for valid setups. Manual Check provides detailed math for a specific config."
     )
-    
-    st.divider()
-    
-    if mode == "Manual Check (Report Mode)":
-        st.subheader("Manual Configuration")
-        m_n = st.number_input("Number of layers ($n$)", value=5, min_value=2)
-        m_ti = st.number_input("Inner layer thick ($t_i$)", value=12)
-        m_ts = st.number_input("Plate thickness ($t_s$)", value=4)
-        st.info("Input the configuration you wish to verify and document.")
     
     st.divider()
     st.write("Standard: EN 1337-3:2005")
@@ -39,6 +32,59 @@ def style_status_df(df):
         return df.style.applymap(_color_status, subset=['STATUS'])
     return df
 
+# --- HELPER FUNCTION FOR BUILDING BEARING SECTION ---
+# app.py - UPDATED SECTION
+
+def draw_bearing_section(n, ti, ts, a):
+    """Generates a cross-section plot with External Plate logic (n+1 plates)."""
+    fig, ax = plt.subplots(figsize=(10, 4))
+    
+    cover_top_bot = 2.5
+    edge_cover = 4
+    a_prime = a - (2 * edge_cover)
+    
+    current_y = 0
+    
+    # 1. Bottom Cover
+    ax.add_patch(plt.Rectangle((0, current_y), a, cover_top_bot, color='gray', alpha=0.3, label='Elastomer Cover'))
+    current_y += cover_top_bot
+    
+    # 2. Bottom External Plate (The +1)
+    ax.add_patch(plt.Rectangle((edge_cover, current_y), a_prime, ts, color='black', label='Steel Plate'))
+    current_y += ts
+    
+    # 3. Internal Layers (n elastomer, n-1 plates between them)
+    for i in range(n):
+        # Elastomer Layer
+        ax.add_patch(plt.Rectangle((0, current_y), a, ti, color='gray', alpha=0.3))
+        current_y += ti
+        
+        # Add reinforcing plate after the elastomer layer, UNLESS it's the last one 
+        # (because the last plate is the top external plate handled below)
+        if i < n - 1:
+            ax.add_patch(plt.Rectangle((edge_cover, current_y), a_prime, ts, color='black'))
+            current_y += ts
+            
+    # 4. Top External Plate (The +1)
+    ax.add_patch(plt.Rectangle((edge_cover, current_y), a_prime, ts, color='black'))
+    current_y += ts
+    
+    # 5. Top Cover
+    ax.add_patch(plt.Rectangle((0, current_y), a, cover_top_bot, color='gray', alpha=0.3))
+    total_h = current_y + cover_top_bot
+    
+    # Plotting Formatting
+    ax.set_xlim(-10, a + 10)
+    ax.set_ylim(-5, total_h + 10)
+    ax.set_aspect('equal')
+    ax.axis('off')
+    
+    ax.annotate('', xy=(a+5, 0), xytext=(a+5, total_h), arrowprops=dict(arrowstyle='<->'))
+    ax.text(a+7, total_h/2, f'$T_b = {round(total_h,1)}$ mm', va='center')
+    
+    st.pyplot(fig)
+
+    
 # --- MAIN UI ---
 st.title("🏗️ EN 1337-3 Bearing Pad Design")
 st.markdown("Automated design checking and procedural reporting for laminated elastomeric bearings.")
@@ -74,7 +120,8 @@ G, Kf, Kh = 0.9, 0.6, 1.0
 
 # --- 2. EXECUTION LOGIC ---
 
-if mode == "Optimization (Search)":
+if mode == "Elastomer Configuration":
+    st.divider()
     if st.button("Run Design Check", type="primary", use_container_width=True):
         configs = engine.find_bearing_configs(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd)
         
@@ -97,62 +144,88 @@ if mode == "Optimization (Search)":
                     "eps_cd": "ε_c,d", "eps_qd": "ε_q,d", "eps_ad": "ε_a,d", "eps_td": "ε_t,d"
                 })
                 st.dataframe(style_status_df(df_strains), use_container_width=True)
-                with st.expander("ℹ️ View Criteria"):
-                    st.info(r"$\epsilon_{q,d} \le 1.0$ and $\epsilon_{t,d} \le 7.0$")
+                with st.expander("ℹ️ View Strain Criteria"):
+                    st.info(r"""
+                    **Acceptance Criteria:**
+                    1. **Shear Strain**: $\epsilon_{q,d} \le 1.0$ (Clause 5.3.3.3)
+                    2. **Total Strain**: $\epsilon_{t,d} \le 7.0$ (Clause 5.3.3.2)
+                    *Where $\epsilon_{t,d} = K_L(\epsilon_{c,d} + \epsilon_{q,d} + \epsilon_{a,d})$*
+                    """)
 
             with t2:
+                st.markdown("### Clause 5.3.3.6: Rotational and Buckling Limit")
                 res_stab = engine.check_stability(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd)
                 df_stab = pd.DataFrame(res_stab).rename(columns={"sum_vzd": "Σv_z,d", "uplift": "Uplift", "p_act": "p_act", "p_lim": "p_lim"})
                 st.dataframe(style_status_df(df_stab), use_container_width=True)
-                with st.expander("ℹ️ View Criteria"):
-                    st.info(r"Uplift check: $\sum v_{z,d} - \text{rotation term} \ge 0$. Buckling: $p_{act} < p_{lim}$")
+                with st.expander("ℹ️ View Stability Criteria"):
+                    st.info(r"""
+                    **Acceptance Criteria:**
+                    1. **Rotational Limitation (Uplift)**: $\sum v_{z,d} - \frac{a' \alpha_a + b' \alpha_b}{K_{rd}} \ge 0$
+                    2. **Buckling Stability**: $p_{act} < p_{lim}$ 
+                    *Where $p_{lim} = \frac{2 \cdot a' \cdot G \cdot S}{3 \cdot T_e}$*
+                    """)
             
-        with t3:
-            st.markdown("### Clause 5.3.3.6: Non-Sliding Condition")
-            res_slide = engine.check_sliding(a, b, target_Tb, Fx_d, Fy_d, Fz_dmin, vx_d, vy_d, Kf=Kf)
-            df_slide = pd.DataFrame(res_slide).rename(columns={
-                "sigma_m": "σ_m", "mu_e": "μ_e", "F_fric": "F_fric(kN)", "F_hor": "F_hor(kN)"
-            })
-            st.dataframe(style_status_df(df_slide), use_container_width=True)
-            
-            with st.expander("ℹ️ View Sliding Criteria"):
-                st.info(r"""
-                **Acceptance Criteria:**
-                1. **Friction Check**: $F_{hor} \le F_{fric}$
-                2. **Pressure Check**: $\sigma_m \ge 3.0$ MPa (Required for permanent contact)
-                *Where $\mu_e = 0.1 + \frac{1.5 \cdot K_f}{\sigma_m}$*
-                """)
+            with t3:
+                st.markdown("### Clause 5.3.3.6: Non-Sliding Condition")
+                res_slide = engine.check_sliding(a, b, target_Tb, Fx_d, Fy_d, Fz_dmin, vx_d, vy_d, Kf=Kf)
+                df_slide = pd.DataFrame(res_slide).rename(columns={"sigma_m": "σ_m", "mu_e": "μ_e", "F_fric": "F_fric(kN)", "F_hor": "F_hor(kN)"})
+                st.dataframe(style_status_df(df_slide), use_container_width=True)
+                with st.expander("ℹ️ View Sliding Criteria"):
+                    st.info(r"""
+                    **Acceptance Criteria:**
+                    1. **Friction Check**: $F_{hor} \le F_{fric}$
+                    2. **Pressure Check**: $\sigma_m \ge 3.0$ MPa
+                    *Where $\mu_e = 0.1 + \frac{1.5 \cdot K_f}{\sigma_m}$*
+                    """)
 
-        with t4:
-            st.markdown("### Clause 5.3.3.5: Reinforcing Plate Thickness")
-            res_reinf = engine.check_reinforcement(a, b, target_Tb, Fz_d, vx_d, vy_d, fy=fy, Kh=Kh)
-            df_reinf = pd.DataFrame(res_reinf).rename(columns={"ts_prov": "t_s,prov", "ts_req": "t_s,req"})
-            st.dataframe(style_status_df(df_reinf), use_container_width=True)
+            with t4:
+                st.markdown("### Clause 5.3.3.5: Reinforcing Plate Thickness")
+                res_reinf = engine.check_reinforcement(a, b, target_Tb, Fz_d, vx_d, vy_d, fy=fy, Kh=Kh)
+                df_reinf = pd.DataFrame(res_reinf).rename(columns={"ts_prov": "t_s,prov", "ts_req": "t_s,req"})
+                st.dataframe(style_status_df(df_reinf), use_container_width=True)
+                with st.expander("ℹ️ View Reinforcement Criteria"):
+                    st.info(r"""
+                    **Acceptance Criteria:**
+                    1. **Minimum Thickness**: $t_{s,prov} \ge 2.0$ mm
+                    2. **Strength Check**: $t_{s,prov} \ge t_{s,req}$
+                    """)
             
-            with st.expander("ℹ️ View Reinforcement Criteria"):
-                st.info(r"""
-                **Acceptance Criteria:**
-                1. **Minimum Thickness**: $t_{s,prov} \ge 2.0$ mm
-                2. **Strength Check**: $t_{s,prov} \ge t_{s,req}$
-                *Where $t_{s,req} = \frac{1.3 \cdot F_{z,d} \cdot (t_1 + t_2) \cdot K_h \cdot \gamma_m}{A_r \cdot f_y}$*
-                """)
-    else:
-        st.error("No configurations found matching target height.")
+            with t5:
+                st.markdown("### Clause 5.3.3.7: Forces/Moments Exerted on Structure")
+                res_loads = engine.calculate_structure_loads(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd)
+                df_loads = pd.DataFrame(res_loads).rename(columns={"Rxy_kN": "R_xy(kN)", "Ma_kNm": "M_a(kNm)", "Mb_kNm": "M_b(kNm)"})
+                st.dataframe(df_loads, use_container_width=True)
+        else:
+            st.error("No configurations found matching target height.")
 
 elif mode == "Manual Check (Report Mode)":
+    st.divider()
+    st.header("2. Manual Configuration")
+    m_col1, m_col2, m_col3 = st.columns(3)
+    
+    with m_col1:
+        m_n = st.number_input("Number of layers ($n$)", value=8, min_value=2)
+    with m_col2:
+        m_ti = st.number_input("Inner layer thick ($t_i$) (mm)", value=5,min_value=5)
+    with m_col3:
+        m_ts = st.number_input("Plate thickness ($t_s$) (mm)", value=4, min_value=2)
+        
     if st.button("Generate Calculation Report", type="primary", use_container_width=True):
         st.divider()
         st.header(f"Detailed Calculation Report: $n={m_n}$, $t_i={m_ti}$ mm, $t_s={m_ts}$ mm")
         
-        # Call the procedural engine
-        steps = engine.get_procedural_report(
-            a, b, m_n, m_ti, m_ts, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, Kf, fy
-        )
+        # 2. Section Cut Graph
+        st.subheader("Bearing Pad Section Cut")
+        draw_bearing_section(m_n, m_ti, m_ts, a)
         
-        # Display the math steps
+        # 1. Procedural Engine with Colored Status
+        steps = engine.get_procedural_report(a, b, m_n, m_ti, m_ts, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, Kf, fy)
+        
         with st.container():
             for step in steps:
-                st.markdown(step)
+                # Add color to PASS/FAIL
+                colored_step = step.replace("**PASS**", ":green[**PASS**]").replace("**FAIL**", ":red[**FAIL**]")
+                st.markdown(colored_step)
         
         st.divider()
-        st.success("Report generated successfully. You can copy this into your design documentation.")
+        st.success("Report generated successfully.")
