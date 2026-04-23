@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import engine
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon, Rectangle
 
 
 # Set page to wide mode for better table visibility
@@ -13,8 +14,8 @@ with st.sidebar:
     # Dropdown menu for operation mode
     mode = st.selectbox(
         "Select Operation Mode:", 
-        ["Elastomer Configuration", "Manual Check (Report Mode)"],
-        help="Elastomer Configuration searches for valid setups. Manual Check provides detailed math for a specific config."
+        ["Find Configuration", "Manual Check"],
+        help="Find Configuration searches for valid setups. Manual Check provides detailed calculation for a specific config."
     )
     
     st.divider()
@@ -33,57 +34,86 @@ def style_status_df(df):
     return df
 
 # --- HELPER FUNCTION FOR BUILDING BEARING SECTION ---
-# app.py - UPDATED SECTION
 
-def draw_bearing_section(n, ti, ts, a):
-    """Generates a cross-section plot with External Plate logic (n+1 plates)."""
-    fig, ax = plt.subplots(figsize=(10, 4))
+def draw_bearing_section(n, ti, ts, a, b):
+    """Generates a professional 3/4 isometric section view of the bearing."""
+    fig, ax = plt.subplots(figsize=(12, 8))
     
-    cover_top_bot = 2.5
-    edge_cover = 4
-    a_prime = a - (2 * edge_cover)
+    # Dimensions
+    cover = 2.5
+    ec = 4  # side cover
+    a_p = a - (2 * ec)
+    b_p = b - (2 * ec)
     
-    current_y = 0
+    # Isometric Constants
+    iso_x = 0.7 
+    iso_y = 0.4 
     
-    # 1. Bottom Cover
-    ax.add_patch(plt.Rectangle((0, current_y), a, cover_top_bot, color='gray', alpha=0.3, label='Elastomer Cover'))
-    current_y += cover_top_bot
-    
-    # 2. Bottom External Plate (The +1)
-    ax.add_patch(plt.Rectangle((edge_cover, current_y), a_prime, ts, color='black', label='Steel Plate'))
-    current_y += ts
-    
-    # 3. Internal Layers (n elastomer, n-1 plates between them)
-    for i in range(n):
-        # Elastomer Layer
-        ax.add_patch(plt.Rectangle((0, current_y), a, ti, color='gray', alpha=0.3))
-        current_y += ti
+    def draw_iso_layer(x0, y0, z0, dx, dy, dz, color, alpha=1.0, is_steel=False):
+        safe_alpha = max(0.0, min(1.0, alpha))
+        highlight = max(0.0, min(1.0, alpha * 1.2))
+        shadow = max(0.0, min(1.0, alpha * 0.8))
         
-        # Add reinforcing plate after the elastomer layer, UNLESS it's the last one 
-        # (because the last plate is the top external plate handled below)
-        if i < n - 1:
-            ax.add_patch(plt.Rectangle((edge_cover, current_y), a_prime, ts, color='black'))
-            current_y += ts
-            
-    # 4. Top External Plate (The +1)
-    ax.add_patch(plt.Rectangle((edge_cover, current_y), a_prime, ts, color='black'))
-    current_y += ts
+        # If it's steel, we only see the "cut" faces because it's inside the rubber
+        # Front face
+        ax.add_patch(Rectangle((x0, z0), dx, dz, color=color, alpha=safe_alpha, ec='black', lw=0.3))
+        # Top face
+        top = [(x0, z0 + dz), (x0 + dx, z0 + dz), 
+               (x0 + dx + dy*iso_x, z0 + dz + dy*iso_y), (x0 + dy*iso_x, z0 + dz + dy*iso_y)]
+        ax.add_patch(Polygon(top, color=color, alpha=highlight, ec='black', lw=0.3))
+        # Right face
+        right = [(x0 + dx, z0), (x0 + dx + dy*iso_x, z0 + dy*iso_y), 
+                 (x0 + dx + dy*iso_x, z0 + dz + dy*iso_y), (x0 + dx, z0 + dz)]
+        ax.add_patch(Polygon(right, color=color, alpha=shadow, ec='black', lw=0.3))
+
+    current_z = 0
     
-    # 5. Top Cover
-    ax.add_patch(plt.Rectangle((0, current_y), a, cover_top_bot, color='gray', alpha=0.3))
-    total_h = current_y + cover_top_bot
+    # 1. Bottom Cover (Rubber)
+    draw_iso_layer(0, 0, current_z, a, b, cover, '#333333', 0.6)
+    current_z += cover
     
-    # Plotting Formatting
-    ax.set_xlim(-10, a + 10)
-    ax.set_ylim(-5, total_h + 10)
-    ax.set_aspect('equal')
+    # 2. Main Stack Loop
+    # We need n+1 plates and n rubber layers
+    for i in range(n + 1):
+        # Draw Steel Plate (Recessed by edge cover 'ec')
+        # This is shown as a "cut" view
+        draw_iso_layer(ec, ec, current_z, a_p, b_p, ts, '#FFD700', 1.0) # Gold color for visibility
+        current_z += ts
+        
+        # Draw Inner Elastomer Layer (Full size)
+        if i < n:
+            draw_iso_layer(0, 0, current_z, a, b, ti, '#333333', 0.5)
+            current_z += ti
+
+    # 3. Top Cover (Rubber)
+    draw_iso_layer(0, 0, current_z, a, b, cover, '#333333', 0.6)
+    total_h = current_z + cover
+
+    # Axis Setup
+    ax.set_xlim(-20, a + b*iso_x + 150)
+    ax.set_ylim(-20, total_h + b*iso_y + 50)
     ax.axis('off')
+    ax.set_aspect('equal')
+
+    # Professional Legend Box (Points 1 & 2)
+    props = dict(boxstyle='round,pad=1', facecolor='#f9f9f9', alpha=0.9, edgecolor='#cccccc')
+    legend_text = (
+        r"$\bf{BEARING\ SPECIFICATION}$" + "\n\n"
+        f"Designation: {a} x {b} x {round(total_h,1)}\n"
+        f"Elastomer Layers ($n$): {n} layers\n"
+        f"Layer Thickness ($t_i$): {ti} mm\n"
+        f"Steel Plates ($n+1$): {n+1} plates\n"
+        f"Plate Thickness ($t_s$): {ts} mm\n"
+        f"Top/Bot Covers: {cover} mm\n"
+        f"Side Cover ($e_c$): {ec} mm\n"
+        f"Total Height ($T_b$): {round(total_h,1)} mm"
+    )
+    ax.text(a + b*iso_x + 20, total_h/2, legend_text, fontsize=11, bbox=props, family='monospace', verticalalignment='center')
     
-    ax.annotate('', xy=(a+5, 0), xytext=(a+5, total_h), arrowprops=dict(arrowstyle='<->'))
-    ax.text(a+7, total_h/2, f'$T_b = {round(total_h,1)}$ mm', va='center')
+    # Title and Watermark
+    ax.text(0, -15, "3/4 SECTIONAL ISOMETRIC VIEW - NOT TO SCALE", fontsize=9, style='italic', color='#666666')
     
     st.pyplot(fig)
-
     
 # --- MAIN UI ---
 st.title("🏗️ EN 1337-3 Bearing Pad Design")
@@ -99,7 +129,7 @@ with col1:
     a = st.number_input("Overall Width $a$ (mm)", value=560)
     b = st.number_input("Overall Length $b$ (mm)", value=380)
     target_Tb = st.number_input("Target Total Height $T_b$ (mm)", value=73)
-    fy = st.number_input("Steel Yield $f_y$ (MPa)", value=235)
+    fy = st.number_input("Steel Yield $f_y$ (MPa)", value=240)
 
 with col2:
     st.subheader("Design Loads")
@@ -120,7 +150,7 @@ G, Kf, Kh = 0.9, 0.6, 1.0
 
 # --- 2. EXECUTION LOGIC ---
 
-if mode == "Elastomer Configuration":
+if mode == "Find Configuration":
     st.divider()
     if st.button("Run Design Check", type="primary", use_container_width=True):
         configs = engine.find_bearing_configs(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd)
@@ -198,25 +228,25 @@ if mode == "Elastomer Configuration":
         else:
             st.error("No configurations found matching target height.")
 
-elif mode == "Manual Check (Report Mode)":
+elif mode == "Manual Check":
     st.divider()
     st.header("2. Manual Configuration")
     m_col1, m_col2, m_col3 = st.columns(3)
     
     with m_col1:
-        m_n = st.number_input("Number of layers ($n$)", value=8, min_value=2)
+        m_n = st.number_input("Number of layers ($n$)", value=5, min_value=2)
     with m_col2:
-        m_ti = st.number_input("Inner layer thick ($t_i$) (mm)", value=5,min_value=5)
+        m_ti = st.number_input("Inner layer thick ($t_i$) (mm)", value=10,min_value=5)
     with m_col3:
-        m_ts = st.number_input("Plate thickness ($t_s$) (mm)", value=4, min_value=2)
+        m_ts = st.number_input("Plate thickness ($t_s$) (mm)", value=3, min_value=2)
         
     if st.button("Generate Calculation Report", type="primary", use_container_width=True):
         st.divider()
-        st.header(f"Detailed Calculation Report: $n={m_n}$, $t_i={m_ti}$ mm, $t_s={m_ts}$ mm")
+        st.header(f"Detailed Calculation Report: ")
         
         # 2. Section Cut Graph
         st.subheader("Bearing Pad Section Cut")
-        draw_bearing_section(m_n, m_ti, m_ts, a)
+        draw_bearing_section(m_n, m_ti, m_ts, a,b)
         
         # 1. Procedural Engine with Colored Status
         steps = engine.get_procedural_report(a, b, m_n, m_ti, m_ts, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, Kf, fy)
@@ -228,4 +258,4 @@ elif mode == "Manual Check (Report Mode)":
                 st.markdown(colored_step)
         
         st.divider()
-        st.success("Report generated successfully.")
+        # st.success("Report generated successfully.")
