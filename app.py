@@ -114,7 +114,7 @@ def draw_bearing_section(n, ti, ts, a, b):
     ax.text(a + b*iso_x + 20, total_h/2, legend_text, fontsize=11, bbox=props, family='monospace', verticalalignment='center')
     
     # Title and Watermark
-    ax.text(0, -15, "3/4 SECTIONAL ISOMETRIC VIEW - NOT TO SCALE", fontsize=9, style='italic', color='#666666')
+    ax.text(0, -15, " ISOMETRIC VIEW - NOT TO SCALE", fontsize=9, style='italic', color='#666666')
     
     st.pyplot(fig)
     
