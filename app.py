@@ -16,7 +16,7 @@ with st.sidebar:
     # 1. Select the governing engineering code standard specification
     standard = st.selectbox(
         "Select Design Standard:",
-        ["EN 1337-3:2005", "AASHTO LRFD 2007 METHOD B "],
+        ["EN 1337-3:2005", "AASHTO LRFD 2007 METHOD B"],
         help="Swaps verification algorithms, variables, and procedural math formulation metrics."
     )
     
@@ -121,7 +121,7 @@ st.divider()
 st.header("1. Design Input Space Parameters")
 col1, col2, col3 = st.columns(3)
 
-is_aashto_selected = (standard == "AASHTO LRFD 2007")
+is_aashto_selected = (standard == "AASHTO LRFD 2007 METHOD B")
 
 with col1:
     st.subheader("Geometric Dimensions")
