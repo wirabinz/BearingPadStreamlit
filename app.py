@@ -16,7 +16,7 @@ with st.sidebar:
     # 1. Select the governing engineering code standard specification
     standard = st.selectbox(
         "Select Design Standard:",
-        ["EN 1337-3:2005", "AASHTO LRFD 2007"],
+        ["EN 1337-3:2005", "AASHTO LRFD 2007 METHOD B "],
         help="Swaps verification algorithms, variables, and procedural math formulation metrics."
     )
     
