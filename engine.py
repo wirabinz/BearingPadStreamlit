@@ -19,10 +19,18 @@ def get_ks(ratio):
             return k1 + (k2 - k1) * (ratio - r1) / (r2 - r1)
     return 70.0
 
-def generate_base_configs(a, b, target_Tb):
-    """Generates valid physical combinations of n, ti, ts using n+1 plate rule."""
-    covers = 5        # 2.5mm top + 2.5mm bottom
-    edge_cover = 4    
+def generate_base_configs(a, b, target_Tb, top_bottom_cover=2.5, edge_cover=4):
+    """
+    Generates valid physical combinations of n, ti, ts using n+1 plate rule.
+    
+    Parameters:
+    - a, b: Overall dimensions of the bearing pad.
+    - target_Tb: Target total thickness of the bearing pad.
+    - top_bottom_cover: Thickness of a single cover layer (top or bottom).
+    - edge_cover: Side/edge cover distance.
+    """
+    # Total cover is twice the single top/bottom cover layer
+    covers = 2 * top_bottom_cover    
     valid_ts = {3, 4, 5}
     
     a_prime = a - (2 * edge_cover)
@@ -39,7 +47,8 @@ def generate_base_configs(a, b, target_Tb):
             # Logic Update: n elastomer layers need n+1 plates for external plate config
             denominator = n + 1 
             
-            if remaining <= 0: continue # Check other n values
+            if remaining <= 0: 
+                continue # Check other n values
             
             if remaining % denominator == 0:
                 ts = remaining // denominator
@@ -47,27 +56,38 @@ def generate_base_configs(a, b, target_Tb):
                     base_matches.append({
                         "n": n, "ti": ti, "ts": ts,
                         "a_prime": a_prime, "b_prime": b_prime,
-                        "A1": A1, "lp": lp, "T_b": target_Tb
+                        "A1": A1, "lp": lp, "T_b": target_Tb,
+                        "top_bottom_cover": top_bottom_cover,
+                        "edge_cover": edge_cover
                     })
     return base_matches
 
-def find_bearing_configs(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, K_L=1.0):
-    configs = generate_base_configs(a, b, target_Tb)
+def find_bearing_configs(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, K_L=1.0, top_bottom_cover=2.5, edge_cover=4):
+    """
+    Validates bearing configurations based on EN 1337 clauses 5.3.3.2 - 5.3.3.4.
+    """
+    # Generate base configs passing the custom cover dimensions
+    configs = generate_base_configs(a, b, target_Tb, top_bottom_cover=top_bottom_cover, edge_cover=edge_cover)
     v_xyd = math.sqrt(vx_d**2 + vy_d**2)
     results = []
 
     for c in configs:
+        # Effective area Ar
         Ar = c['A1'] * (1 - (vx_d / c['a_prime']) - (vy_d / c['b_prime']))
+        
+        # Shape factor S
         S = c['A1'] / (c['lp'] * c['ti'])
         
-        # T_q is total elastomer thickness: (n * ti) + covers
-        T_q = (c['n'] * c['ti']) + 5 
+        # T_q is total elastomer thickness: (n * ti) + (2 * top_bottom_cover)
+        total_covers_thickness = 2 * top_bottom_cover
+        T_q = (c['n'] * c['ti']) + total_covers_thickness
         
+        # EN 1337 strain calculations
         e_cd = (1.5 * Fz_d) / (G * Ar * S) if Ar > 0 else 999
         e_qd = v_xyd / T_q
         
-        # sum_ti3 must include the covers as individual layers
-        sum_ti3 = (c['n'] * (c['ti']**3)) + (2 * (2.5**3))
+        # sum_ti3 must include the top and bottom covers as individual layers
+        sum_ti3 = (c['n'] * (c['ti']**3)) + (2 * (top_bottom_cover**3))
         
         e_ad = (((c['a_prime']**2 * alpha_ad) + (c['b_prime']**2 * alpha_bd)) * c['ti']) / (2 * sum_ti3)
         e_td = K_L * (e_cd + e_qd + e_ad)
@@ -80,15 +100,15 @@ def find_bearing_configs(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_b
         })
     return results
 
-def check_stability(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, K_rd=3.0):
-    configs = generate_base_configs(a, b, target_Tb)
+def check_stability(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, K_rd=3.0, top_bottom_cover=2.5, edge_cover=4):
+    configs = generate_base_configs(a, b, target_Tb, top_bottom_cover=top_bottom_cover, edge_cover=edge_cover)
     results = []
     Eb_bulk = 2000
 
     for c in configs:
         Ar = c['A1'] * (1 - (vx_d / c['a_prime']) - (vy_d / c['b_prime']))
         S = c['A1'] / (c['lp'] * c['ti'])
-        Te = (c['n'] * c['ti']) + 5
+        Te = (c['n'] * c['ti']) + (2 * top_bottom_cover)
         v_c_single = (Fz_d * c['ti'] / c['A1']) * (1 / (5 * G * S**2) + 1 / Eb_bulk)
         sum_vzd = c['n'] * v_c_single
         uplift = sum_vzd - ((c['a_prime'] * alpha_ad + c['b_prime'] * alpha_bd) / K_rd)
@@ -103,8 +123,8 @@ def check_stability(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, K_
         })
     return results
 
-def check_sliding(a, b, target_Tb, Fx_d, Fy_d, Fz_dmin, vx_d, vy_d, Kf=0.6):
-    configs = generate_base_configs(a, b, target_Tb)
+def check_sliding(a, b, target_Tb, Fx_d, Fy_d, Fz_dmin, vx_d, vy_d, Kf=0.6, top_bottom_cover=2.5, edge_cover=4):
+    configs = generate_base_configs(a, b, target_Tb, top_bottom_cover=top_bottom_cover, edge_cover=edge_cover)
     Fxy_d = math.sqrt(Fx_d**2 + Fy_d**2)
     results = []
 
@@ -122,8 +142,8 @@ def check_sliding(a, b, target_Tb, Fx_d, Fy_d, Fz_dmin, vx_d, vy_d, Kf=0.6):
         })
     return results
 
-def check_reinforcement(a, b, target_Tb, Fz_d, vx_d, vy_d, fy=235, Kh=1, gamma_m=1.00):
-    configs = generate_base_configs(a, b, target_Tb)
+def check_reinforcement(a, b, target_Tb, Fz_d, vx_d, vy_d, fy=235, Kh=1, gamma_m=1.00, top_bottom_cover=2.5, edge_cover=4):
+    configs = generate_base_configs(a, b, target_Tb, top_bottom_cover=top_bottom_cover, edge_cover=edge_cover)
     results = []
 
     for c in configs:
@@ -136,14 +156,14 @@ def check_reinforcement(a, b, target_Tb, Fz_d, vx_d, vy_d, fy=235, Kh=1, gamma_m
         })
     return results
 
-def calculate_structure_loads(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd):
-    configs = generate_base_configs(a, b, target_Tb)
-    ks = get_ks((b - 8) / (a - 8))
+def calculate_structure_loads(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, top_bottom_cover=2.5, edge_cover=4):
+    configs = generate_base_configs(a, b, target_Tb, top_bottom_cover=top_bottom_cover, edge_cover=edge_cover)
+    ks = get_ks((b - (2 * edge_cover)) / (a - (2 * edge_cover)))
     v_xy = math.sqrt(vx_d**2 + vy_d**2)
     results = []
 
     for c in configs:
-        Te = (c['n'] * c['ti']) + 5
+        Te = (c['n'] * c['ti']) + (2 * top_bottom_cover)
         Rxy = ((a * b) * G * v_xy) / Te
         denom_m = c['n'] * (c['ti']**3) * ks
         Ma = (G * alpha_ad * (c['a_prime']**5) * c['b_prime']) / denom_m
@@ -154,22 +174,26 @@ def calculate_structure_loads(a, b, target_Tb, G, Fz_d, vx_d, vy_d, alpha_ad, al
         })
     return results
 
-def get_procedural_report(a, b, n, ti, ts, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, Kf=0.6, fy=235, Fz_dmin=1000000, Fx_d=50000, Fy_d=20000):
+def get_procedural_report(a, b, n, ti, ts, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_bd, 
+                           Kf=0.6, fy=235, Fz_dmin=1000000, Fx_d=50000, Fy_d=20000, 
+                           top_bottom_cover=2.5, edge_cover=4):
     """
     Generates a full step-by-step LaTeX report with formula, 
     value substitution, results, and units for all EN 1337-3 checks.
     """
-    import math
     
-    # --- Pre-calculations ---
-    edge_cover = 4
+    # --- Dynamic Cover Calculations ---
+    covers = 2 * top_bottom_cover
+    
     a_p = a - (2 * edge_cover)
     b_p = b - (2 * edge_cover)
     A1 = a_p * b_p
     lp = 2 * (a_p + b_p)
     S = A1 / (lp * ti)
     Ar = A1 * (1 - (vx_d / a_p) - (vy_d / b_p))
-    T_q = (n * ti) + 5
+    
+    # T_q is total elastomer thickness: (n * ti) + total cover thickness
+    T_q = (n * ti) + covers
     v_xyd = math.sqrt(vx_d**2 + vy_d**2)
     Fxy_d = math.sqrt(Fx_d**2 + Fy_d**2)
     
@@ -177,8 +201,8 @@ def get_procedural_report(a, b, n, ti, ts, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_
 
     # --- Section 1: Geometry ---
     report.append(r"## 1. Effective Geometry")
-    report.append(rf"* Effective Width: $a' = a - 2 \cdot e_c = {a} - 8 = {a_p}$ mm")
-    report.append(rf"* Effective Length: $b' = b - 2 \cdot e_c = {b} - 8 = {b_p}$ mm")
+    report.append(rf"* Effective Width: $a' = a - 2 \cdot e_c = {a} - {2 * edge_cover} = {a_p}$ mm")
+    report.append(rf"* Effective Length: $b' = b - 2 \cdot e_c = {b} - {2 * edge_cover} = {b_p}$ mm")
     report.append(rf"* Effective Plan Area: $A' = a' \cdot b' = {a_p} \cdot {b_p} = {A1}$ mm²")
     report.append(rf"* Shape Factor: $S = \frac{{A'}}{{l_p \cdot t_i}} = \frac{{{A1}}}{{{lp} \cdot {ti}}} = {round(S, 2)}$")
     report.append(rf"* Reduced Area: $A_r = A' \cdot (1 - \frac{{v_{{x,d}}}}{{a'}} - \frac{{v_{{y,d}}}}{{b'}}) = {A1} \cdot (1 - \frac{{{vx_d}}}{{{a_p}}} - \frac{{{vy_d}}}{{{b_p}}}) = {round(Ar, 2)}$ mm²")
@@ -192,7 +216,8 @@ def get_procedural_report(a, b, n, ti, ts, G, Fz_d, vx_d, vy_d, alpha_ad, alpha_
     e_qd = v_xyd / T_q
     report.append(rf"* Shear Strain: $\epsilon_{{q,d}} = \frac{{v_{{xy,d}}}}{{T_q}} = \frac{{{round(v_xyd, 2)}}}{{{T_q}}} = {round(e_qd, 3)}$")
     
-    sum_ti3 = (n * (ti**3)) + (2 * (2.5**3))
+    # Updated to dynamically use top_bottom_cover
+    sum_ti3 = (n * (ti**3)) + (2 * (top_bottom_cover**3))
     e_ad = (((a_p**2 * alpha_ad) + (b_p**2 * alpha_bd)) * ti) / (2 * sum_ti3)
     report.append(rf"* Rotational Strain: $\epsilon_{{a,d}} = \frac{{(a'^2 \alpha_a + b'^2 \alpha_b) \cdot t_i}}{{2 \cdot \sum t_i^3}} = \frac{{({a_p}^2 \cdot {alpha_ad} + {b_p}^2 \cdot {alpha_bd}) \cdot {ti}}}{{2 \cdot {round(sum_ti3, 1)}}} = {round(e_ad, 3)}$")
     
